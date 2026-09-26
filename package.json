@@ -1,0 +1,26 @@
+{
+  "name": "tailwindcss",
+  "version": "1.0.0",
+  "description": "Projet d'apprentissage pour Tailwind CSS.",
+  "main": "index.js",
+  "scripts": {
+    "serve": "npx serve",
+    "dev": "npx @tailwindcss/cli -i ./assets/styles/main.css -o ./dist/style.css --watch",
+    "test": "playwright test --config=.teaching/playwright.config.ts",
+    "submit-dry": "tsx .teaching/submit.ts --dry-run",
+    "submit": "tsx .teaching/submit.ts"
+  },
+  "keywords": [],
+  "author": "Romain Divandary",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@playwright/test": "^1.63.0",
+    "@tailwindcss/cli": "^4.3.3",
+    "tailwindcss": "^4.3.3"
+  },
+  "devDependencies": {
+    "serve": "^14.2.6",
+    "tsx": "^4.23.13"
+  }
+}
