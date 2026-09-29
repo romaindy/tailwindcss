@@ -1,4 +1,4 @@
-import {execSync} from 'node:child_process'
+import {spawnSync} from 'node:child_process'
 import {existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync} from 'node:fs'
 import {tmpdir} from 'node:os'
 import {basename, join} from 'node:path'
@@ -7,6 +7,7 @@ import {createInterface} from 'node:readline/promises'
 const API_URL = 'https://esgi.tail8b378d.ts.net/api'
 const STUDENT_PATH = '.teaching/student.json'
 const dryRun = process.argv.includes('--dry-run')
+const PLAYWRIGHT_BIN = process.platform === 'win32' ? 'npx.cmd' : 'npx'
 
 const rl = createInterface({
     input: process.stdin,
@@ -71,6 +72,48 @@ function extractJsonReport(output: string) {
     }
 }
 
+function isPlaywrightSetupError(output: string) {
+    const normalized = output.toLowerCase()
+
+    return (
+        normalized.includes('please run npx playwright install') ||
+        normalized.includes('npx playwright install') ||
+        normalized.includes('executable doesn\'t exist') ||
+        (normalized.includes('browserType.launch') && normalized.includes('executable')) ||
+        (normalized.includes('browser type') && normalized.includes('not found')) ||
+        normalized.includes('cannot find module \'@playwright/test\'') ||
+        normalized.includes('playwright is not installed') ||
+        (normalized.includes('spawn npx') && normalized.includes('enoent'))
+    )
+}
+
+function ensurePlaywrightCanRun(run: { success: boolean, output: string, needsInstall: boolean }) {
+    if (run.needsInstall) {
+        console.error('\n⚠️ Playwright n\'est pas prêt dans ce projet.')
+        console.error('👉 Commande à lancer :')
+        console.error('   npx playwright install')
+        console.error('   npx playwright install --with-deps')
+        console.error('puis relancez la soumission.')
+        throw new Error('Playwright non installé / browsers absents')
+    }
+
+    const report = extractJsonReport(run.output)
+
+    if (!run.success && !report) {
+        console.error('\n⚠️ Les tests n\'ont pas démarré correctement.')
+        console.error('Le rapport JSON Playwright n\'a pas été généré.')
+        console.error('Vérifiez que Playwright est bien installé :')
+        console.error('   npx playwright install')
+        throw new Error('Aucun rapport Playwright valide reçu')
+    }
+
+    if (!report) {
+        throw new Error('Aucun rapport JSON Playwright valide reçu')
+    }
+
+    return report
+}
+
 async function ask(question: string) {
     return (await rl.question(question)).trim()
 }
@@ -133,15 +176,26 @@ function runPlaywright(testFile: string) {
     const outputDir = mkdtempSync(join(tmpdir(), 'submit-playwright-'))
 
     try {
-        const output = execSync(
-            `playwright test "${testFile}" --config=.teaching/playwright.config.ts --reporter=json --output="${outputDir}"`,
-            {encoding: 'utf8'},
+        const result = spawnSync(
+            PLAYWRIGHT_BIN,
+            ['playwright', 'test', testFile, '--config=.teaching/playwright.config.ts', '--reporter=json', '--output=' + outputDir],
+            {
+                encoding: 'utf8',
+                shell: process.platform === 'win32',
+                stdio: ['inherit', 'pipe', 'pipe'],
+            },
         )
 
-        return {success: true, output}
+        const output = `${result.stdout ?? ''}${result.stderr ?? ''}`
+
+        return {
+            success: result.status === 0,
+            output,
+            needsInstall: isPlaywrightSetupError(output),
+        }
     } catch (error: any) {
         const output = error.stdout?.toString() ?? error.stderr?.toString() ?? ''
-        return {success: false, output}
+        return {success: false, output, needsInstall: isPlaywrightSetupError(output)}
     } finally {
         rmSync(outputDir, {recursive: true, force: true})
     }
@@ -176,14 +230,15 @@ async function main() {
     let testResult: { success: boolean, passed: number, total: number }
 
     const run = runPlaywright(testFile)
-    const report = extractJsonReport(run.output)
-    const stats = report ? getPlaywrightStats(report) : {passed: 0, total: 0}
+    const report = ensurePlaywrightCanRun(run)
+    const stats = getPlaywrightStats(report)
 
     testResult = {
         success: run.success,
         passed: stats.passed,
         total: stats.total,
     }
+
 
     console.log('\n------------------------')
     console.log(`Score : ${testResult.passed}/${testResult.total}`)
